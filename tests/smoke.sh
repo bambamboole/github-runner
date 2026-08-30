@@ -43,6 +43,11 @@ node --version | grep -q '^v24\.20\.0$'
 npm --version
 playwright --version | grep -q 'Version 1\.62\.1'
 
+if ! runuser --user runner -- test -w /ms-playwright; then
+  echo "Playwright browser directory is not writable by the runner user." >&2
+  exit 1
+fi
+
 if [[ "${SKIP_PLAYWRIGHT_LAUNCH:-false}" == "true" ]]; then
   if ! find /ms-playwright -type f -name headless_shell -perm -u=x -print -quit | grep -q .; then
     echo "Playwright Chromium headless shell is missing or not executable." >&2
