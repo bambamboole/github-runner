@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+version="${1:-}"
+case "${version}" in
+  8.4|8.5)
+    ;;
+  *)
+    echo "Usage: use-php 8.4|8.5" >&2
+    exit 64
+    ;;
+esac
+
+for executable in php phpize php-config; do
+  versioned_path="/usr/bin/${executable}${version}"
+  if [[ ! -x "${versioned_path}" ]]; then
+    echo "Missing executable: ${versioned_path}" >&2
+    exit 1
+  fi
+done
+
+if [[ "$(id -u)" -eq 0 ]]; then
+  privilege=()
+else
+  privilege=(sudo)
+fi
+
+"${privilege[@]}" update-alternatives --set php "/usr/bin/php${version}"
+"${privilege[@]}" update-alternatives --set phpize "/usr/bin/phpize${version}"
+"${privilege[@]}" update-alternatives --set php-config "/usr/bin/php-config${version}"
+
+php --version | head -n 1

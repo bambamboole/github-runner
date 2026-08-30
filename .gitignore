@@ -1,0 +1,4 @@
+plans/
+.env
+.github-app.env
+.DS_Store

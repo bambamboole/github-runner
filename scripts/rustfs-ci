@@ -1,0 +1,267 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly COMMAND="${1:-}"
+readonly TEMP_ROOT="${RUNNER_TEMP:-/tmp}"
+readonly STATE_ROOT="${RUSTFS_STATE_DIR:-${TEMP_ROOT%/}/rustfs-ci}"
+readonly PID_FILE="${STATE_ROOT}/pid"
+readonly DATA_FILE="${STATE_ROOT}/data-dir"
+readonly MANAGED_FILE="${STATE_ROOT}/managed-data"
+readonly LOG_FILE="${STATE_ROOT}/rustfs.log"
+readonly ENDPOINT_FILE="${STATE_ROOT}/endpoint"
+readonly BUCKET_FILE="${STATE_ROOT}/bucket"
+
+usage() {
+  echo "Usage: rustfs-ci start|status|stop" >&2
+}
+
+read_pid() {
+  local pid=""
+
+  [[ -f "${PID_FILE}" ]] || return 1
+  IFS= read -r pid < "${PID_FILE}"
+  [[ "${pid}" =~ ^[1-9][0-9]*$ ]] || return 1
+  printf '%s' "${pid}"
+}
+
+is_running() {
+  local pid="${1}"
+  kill -0 "${pid}" 2>/dev/null
+}
+
+is_rustfs_process() {
+  local pid="${1}"
+  local command_name=""
+
+  command_name="$(ps -p "${pid}" -o comm= 2>/dev/null || true)"
+  [[ "${command_name##*/}" == "rustfs" ]]
+}
+
+validate_bucket() {
+  local bucket="${1}"
+
+  [[ "${bucket}" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]] || return 1
+  [[ "${bucket}" != *..* ]] || return 1
+  [[ "${bucket}" != *.-* ]] || return 1
+  [[ "${bucket}" != *-.* ]] || return 1
+  [[ ! "${bucket}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
+}
+
+endpoint_from_address() {
+  local address="${1}"
+  local host=""
+  local port=""
+
+  if [[ ! "${address}" =~ ^(127\.0\.0\.1|0\.0\.0\.0|localhost):([0-9]{1,5})$ ]]; then
+    echo "RUSTFS_ADDRESS must use 127.0.0.1, localhost or 0.0.0.0 plus a TCP port." >&2
+    return 1
+  fi
+
+  host="${BASH_REMATCH[1]}"
+  port="${BASH_REMATCH[2]}"
+  if (( port < 1 || port > 65535 )); then
+    echo "RUSTFS_ADDRESS contains an invalid TCP port." >&2
+    return 1
+  fi
+
+  [[ "${host}" == "0.0.0.0" ]] && host="127.0.0.1"
+  printf 'http://%s:%s' "${host}" "${port}"
+}
+
+clear_state() {
+  rm -f -- \
+    "${PID_FILE}" \
+    "${DATA_FILE}" \
+    "${MANAGED_FILE}" \
+    "${ENDPOINT_FILE}" \
+    "${BUCKET_FILE}"
+}
+
+remove_managed_data() {
+  local data_dir="${1:-}"
+  local managed="${2:-false}"
+
+  [[ "${managed}" == "true" ]] || return 0
+  case "${data_dir}" in
+    "${TEMP_ROOT%/}"/rustfs-data.*)
+      if [[ -d "${data_dir}" && ! -L "${data_dir}" ]]; then
+        rm -rf -- "${data_dir}"
+      fi
+      ;;
+    *)
+      echo "Refusing to remove unexpected managed data path: ${data_dir}" >&2
+      return 1
+      ;;
+  esac
+}
+
+stop_process() {
+  local pid="${1}"
+  local attempt=0
+
+  if ! is_running "${pid}"; then
+    return 0
+  fi
+  if ! is_rustfs_process "${pid}"; then
+    echo "Refusing to stop PID ${pid}: process is not RustFS." >&2
+    return 1
+  fi
+
+  kill -TERM "${pid}"
+  for ((attempt = 0; attempt < 40; attempt++)); do
+    is_running "${pid}" || return 0
+    sleep 0.25
+  done
+
+  kill -KILL "${pid}"
+}
+
+start() {
+  local address="${RUSTFS_ADDRESS:-127.0.0.1:9000}"
+  local endpoint=""
+  local data_dir=""
+  local managed_data="false"
+  local pid=""
+  local attempt=0
+
+  : "${RUSTFS_ACCESS_KEY:?RUSTFS_ACCESS_KEY is required}"
+  : "${RUSTFS_SECRET_KEY:?RUSTFS_SECRET_KEY is required}"
+  : "${RUSTFS_BUCKET:?RUSTFS_BUCKET is required}"
+
+  if ! validate_bucket "${RUSTFS_BUCKET}"; then
+    echo "RUSTFS_BUCKET is not a valid S3 bucket name." >&2
+    exit 64
+  fi
+  endpoint="$(endpoint_from_address "${address}")"
+
+  if pid="$(read_pid 2>/dev/null)" && is_running "${pid}"; then
+    echo "RustFS is already running with PID ${pid}." >&2
+    exit 1
+  fi
+
+  mkdir -p "${TEMP_ROOT}" "${STATE_ROOT}"
+  chmod 0700 "${STATE_ROOT}"
+  clear_state
+
+  if [[ -n "${RUSTFS_DATA_DIR:-}" ]]; then
+    data_dir="${RUSTFS_DATA_DIR}"
+    mkdir -p "${data_dir}"
+    chmod 0700 "${data_dir}"
+  else
+    data_dir="$(mktemp -d "${TEMP_ROOT%/}/rustfs-data.XXXXXX")"
+    managed_data="true"
+  fi
+  mkdir -p "${data_dir}/logs"
+
+  printf '%s\n' "${data_dir}" > "${DATA_FILE}"
+  printf '%s\n' "${managed_data}" > "${MANAGED_FILE}"
+  printf '%s\n' "${endpoint}" > "${ENDPOINT_FILE}"
+  printf '%s\n' "${RUSTFS_BUCKET}" > "${BUCKET_FILE}"
+
+  RUSTFS_ACCESS_KEY="${RUSTFS_ACCESS_KEY}" \
+  RUSTFS_SECRET_KEY="${RUSTFS_SECRET_KEY}" \
+  RUSTFS_ADDRESS="${address}" \
+  RUSTFS_CONSOLE_ENABLE="false" \
+  RUSTFS_OBS_LOGGER_LEVEL="error" \
+  RUSTFS_OBS_LOG_DIRECTORY="${data_dir}/logs" \
+    rustfs "${data_dir}" >> "${LOG_FILE}" 2>&1 &
+  pid=$!
+  printf '%s\n' "${pid}" > "${PID_FILE}"
+
+  for ((attempt = 0; attempt < 60; attempt++)); do
+    if ! is_running "${pid}"; then
+      echo "RustFS exited during startup. Log follows:" >&2
+      tail -n 100 "${LOG_FILE}" >&2 || true
+      remove_managed_data "${data_dir}" "${managed_data}"
+      clear_state
+      exit 1
+    fi
+    if curl --fail --silent --show-error "${endpoint}/health/ready" >/dev/null 2>&1; then
+      break
+    fi
+    sleep 0.5
+  done
+
+  if ! curl --fail --silent --show-error "${endpoint}/health/ready" >/dev/null 2>&1; then
+    echo "RustFS did not become ready within 30 seconds." >&2
+    stop_process "${pid}" || true
+    tail -n 100 "${LOG_FILE}" >&2 || true
+    remove_managed_data "${data_dir}" "${managed_data}"
+    clear_state
+    exit 1
+  fi
+
+  if ! AWS_ACCESS_KEY_ID="${RUSTFS_ACCESS_KEY}" \
+    AWS_SECRET_ACCESS_KEY="${RUSTFS_SECRET_KEY}" \
+    AWS_DEFAULT_REGION="us-east-1" \
+    aws --endpoint-url "${endpoint}" s3api head-bucket --bucket "${RUSTFS_BUCKET}" >/dev/null 2>&1; then
+    if ! AWS_ACCESS_KEY_ID="${RUSTFS_ACCESS_KEY}" \
+      AWS_SECRET_ACCESS_KEY="${RUSTFS_SECRET_KEY}" \
+      AWS_DEFAULT_REGION="us-east-1" \
+      aws --endpoint-url "${endpoint}" s3api create-bucket --bucket "${RUSTFS_BUCKET}" >/dev/null; then
+      echo "RustFS is ready, but bucket ${RUSTFS_BUCKET} could not be created." >&2
+      stop_process "${pid}" || true
+      tail -n 100 "${LOG_FILE}" >&2 || true
+      remove_managed_data "${data_dir}" "${managed_data}"
+      clear_state
+      exit 1
+    fi
+  fi
+
+  if [[ -n "${GITHUB_ENV:-}" ]]; then
+    printf 'RUSTFS_ENDPOINT=%s\n' "${endpoint}" >> "${GITHUB_ENV}"
+  fi
+
+  echo "RustFS is ready at ${endpoint}; bucket ${RUSTFS_BUCKET} exists."
+}
+
+status() {
+  local pid=""
+  local endpoint=""
+
+  if ! pid="$(read_pid 2>/dev/null)" || ! is_running "${pid}" || ! is_rustfs_process "${pid}"; then
+    echo "RustFS is not running."
+    return 1
+  fi
+
+  IFS= read -r endpoint < "${ENDPOINT_FILE}"
+  if ! curl --fail --silent --show-error "${endpoint}/health/ready" >/dev/null; then
+    echo "RustFS process ${pid} is running but not ready." >&2
+    return 1
+  fi
+
+  echo "RustFS is ready at ${endpoint} with PID ${pid}."
+}
+
+stop() {
+  local pid=""
+  local data_dir=""
+  local managed_data="false"
+
+  [[ -f "${DATA_FILE}" ]] && IFS= read -r data_dir < "${DATA_FILE}"
+  [[ -f "${MANAGED_FILE}" ]] && IFS= read -r managed_data < "${MANAGED_FILE}"
+
+  if pid="$(read_pid 2>/dev/null)"; then
+    stop_process "${pid}"
+  fi
+
+  remove_managed_data "${data_dir}" "${managed_data}"
+  clear_state
+  echo "RustFS is stopped."
+}
+
+case "${COMMAND}" in
+  start)
+    start
+    ;;
+  status)
+    status
+    ;;
+  stop)
+    stop
+    ;;
+  *)
+    usage
+    exit 64
+    ;;
+esac

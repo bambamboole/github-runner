@@ -1,0 +1,30 @@
+services:
+  runner:
+    image: ${RUNNER_IMAGE:-github-runner:local}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    stop_grace_period: 2m
+    shm_size: 2gb
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'Runner.Listener run' >/dev/null"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    environment:
+      RUNNER_SCOPE: org
+      RUN_AS_ROOT: "false"
+      RANDOM_RUNNER_SUFFIX: "false"
+      UNSET_CONFIG_VARS: "true"
+      DISABLE_AUTO_UPDATE: "true"
+      ORG_NAME: ${GITHUB_ORG_NAME:?Set GITHUB_ORG_NAME in Coolify}
+      APP_LOGIN: ${GITHUB_APP_LOGIN:?Set GITHUB_APP_LOGIN in Coolify}
+      APP_ID: ${GITHUB_APP_ID:?Set GITHUB_APP_ID in Coolify}
+      APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:?Set GITHUB_APP_PRIVATE_KEY in Coolify}
+      RUNNER_NAME: ${RUNNER_NAME:-github-ci-01}
+      RUNNER_GROUP: ${RUNNER_GROUP:-Default}
+      LABELS: ${RUNNER_LABELS:-ci,docker,php-8.4,php-8.5,playwright,chromium,rustfs}

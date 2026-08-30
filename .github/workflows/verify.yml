@@ -1,0 +1,103 @@
+name: Verify and publish runner image
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE_NAME: ghcr.io/bambamboole/github-runner
+
+jobs:
+  verify:
+    name: Verify ${{ matrix.arch }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+          - arch: arm64
+            platform: linux/arm64
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - name: Lint scripts and validate Compose
+        run: make lint compose-config
+
+      - name: Build image
+        env:
+          ARCH: ${{ matrix.arch }}
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          docker buildx build \
+            --platform "${PLATFORM}" \
+            --load \
+            --tag "github-runner:test-${ARCH}" \
+            --cache-from "type=gha,scope=runner-${ARCH}" \
+            --cache-to "type=gha,mode=max,scope=runner-${ARCH}" \
+            .
+
+      - name: Test installed tools
+        env:
+          SKIP_PLAYWRIGHT_LAUNCH: ${{ matrix.arch == 'arm64' }}
+        run: make test-image IMAGE="github-runner:test-${{ matrix.arch }}"
+
+      - name: Test RustFS lifecycle
+        run: make test-rustfs IMAGE="github-runner:test-${{ matrix.arch }}"
+
+      - name: Test Docker socket access
+        run: make test-docker IMAGE="github-runner:test-${{ matrix.arch }}"
+
+  publish:
+    name: Publish multi-architecture image
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish image
+        run: |
+          short_sha="${GITHUB_SHA:0:12}"
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --push \
+            --tag "${IMAGE_NAME}:latest" \
+            --tag "${IMAGE_NAME}:sha-${short_sha}" \
+            --cache-from type=gha,scope=runner-amd64 \
+            --cache-from type=gha,scope=runner-arm64 \
+            .

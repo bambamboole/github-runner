@@ -1,0 +1,276 @@
+#!/usr/bin/env python3
+"""Create a runner GitHub App through GitHub's browser-based manifest flow."""
+
+from __future__ import annotations
+
+import argparse
+import html
+import json
+import os
+import re
+import secrets
+import shutil
+import subprocess
+import sys
+import threading
+import urllib.parse
+import webbrowser
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from typing import Any
+
+
+API_VERSION = "2026-03-10"
+DEFAULT_HOMEPAGE = "https://github.com/bambamboole/github-runner"
+ORG_PATTERN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$")
+
+
+class ManifestServer(ThreadingHTTPServer):
+    state_token: str
+    manifest: str
+    github_url: str
+    callback_code: str | None
+    callback_event: threading.Event
+
+
+class ManifestHandler(BaseHTTPRequestHandler):
+    server: ManifestServer
+
+    def do_GET(self) -> None:  # noqa: N802 - required by BaseHTTPRequestHandler
+        request = urllib.parse.urlparse(self.path)
+        if request.path == "/":
+            self._show_manifest_form()
+            return
+        if request.path == "/callback":
+            self._handle_callback(request.query)
+            return
+        self.send_error(404)
+
+    def log_message(self, _format: str, *_args: Any) -> None:
+        return
+
+    def _show_manifest_form(self) -> None:
+        document = f"""<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Create GitHub App</title></head>
+<body>
+  <p>Redirecting to GitHub to create the runner app…</p>
+  <form id="manifest" action="{html.escape(self.server.github_url)}" method="post">
+    <input type="hidden" name="manifest" value="{html.escape(self.server.manifest)}">
+    <button type="submit">Continue to GitHub</button>
+  </form>
+  <script>document.getElementById('manifest').submit();</script>
+</body>
+</html>
+"""
+        self._respond(200, document)
+
+    def _handle_callback(self, query: str) -> None:
+        parameters = urllib.parse.parse_qs(query)
+        state = parameters.get("state", [""])[0]
+        code = parameters.get("code", [""])[0]
+
+        if not secrets.compare_digest(state, self.server.state_token):
+            self._respond(400, "Invalid state. Return to the terminal and try again.")
+            return
+        if not code:
+            self._respond(400, "GitHub did not return a manifest code.")
+            return
+
+        self.server.callback_code = code
+        self.server.callback_event.set()
+        self._respond(200, "GitHub App created. You can return to the terminal.")
+
+    def _respond(self, status: int, body: str) -> None:
+        payload = body.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Create and configure a GitHub App for an organization runner."
+    )
+    parser.add_argument("organization", help="GitHub organization that will own the app")
+    parser.add_argument(
+        "--name",
+        help="globally unique app name (default: <organization>-ci-runner)",
+    )
+    parser.add_argument(
+        "--homepage",
+        default=DEFAULT_HOMEPAGE,
+        help=f"app homepage (default: {DEFAULT_HOMEPAGE})",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=Path(".github-app.env"),
+        help="new credentials file to create (default: .github-app.env)",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=900,
+        help="seconds to wait for browser confirmation (default: 900)",
+    )
+    parser.add_argument(
+        "--no-open",
+        action="store_true",
+        help="print browser URLs instead of opening them automatically",
+    )
+    return parser.parse_args()
+
+
+def validate_args(args: argparse.Namespace) -> str:
+    if not ORG_PATTERN.fullmatch(args.organization):
+        raise ValueError("organization is not a valid GitHub organization name")
+    if args.timeout < 1:
+        raise ValueError("timeout must be greater than zero")
+    if args.output.exists():
+        raise ValueError(f"refusing to overwrite existing file: {args.output}")
+    if not args.output.parent.is_dir():
+        raise ValueError(f"output directory does not exist: {args.output.parent}")
+
+    homepage = urllib.parse.urlparse(args.homepage)
+    if homepage.scheme not in {"http", "https"} or not homepage.netloc:
+        raise ValueError("homepage must be an absolute HTTP(S) URL")
+
+    app_name = args.name or f"{args.organization}-ci-runner"
+    if not app_name.strip():
+        raise ValueError("app name must not be empty")
+    return app_name
+
+
+def require_gh() -> None:
+    if shutil.which("gh") is None:
+        raise RuntimeError("GitHub CLI (gh) is required")
+    result = subprocess.run(
+        ["gh", "auth", "status", "--hostname", "github.com"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError("gh is not authenticated for github.com; run: gh auth login")
+
+
+def exchange_manifest_code(code: str) -> dict[str, Any]:
+    result = subprocess.run(
+        [
+            "gh",
+            "api",
+            "--method",
+            "POST",
+            "--header",
+            "Accept: application/vnd.github+json",
+            "--header",
+            f"X-GitHub-Api-Version: {API_VERSION}",
+            f"app-manifests/{code}/conversions",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = result.stderr.strip() or "unknown gh api error"
+        raise RuntimeError(f"manifest conversion failed: {detail}")
+
+    response = json.loads(result.stdout)
+    if not all(key in response for key in ("id", "slug", "pem")):
+        raise RuntimeError("manifest response is missing id, slug, or pem")
+    return response
+
+
+def write_credentials(
+    output: Path, organization: str, response: dict[str, Any]
+) -> str:
+    pem = str(response["pem"]).rstrip("\n").replace("\n", "\\n")
+    contents = (
+        f"GITHUB_ORG_NAME={organization}\n"
+        f"GITHUB_APP_LOGIN={organization}\n"
+        f"GITHUB_APP_ID={response['id']}\n"
+        f"GITHUB_APP_PRIVATE_KEY={pem}\n"
+    )
+
+    descriptor = os.open(output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        handle.write(contents)
+    return contents
+
+
+def open_or_print(url: str, no_open: bool) -> None:
+    if no_open or not webbrowser.open(url):
+        print(f"Open this URL in a browser:\n{url}")
+
+
+def main() -> int:
+    args = parse_args()
+    server_started = False
+    try:
+        app_name = validate_args(args)
+        require_gh()
+
+        state = secrets.token_urlsafe(32)
+        server = ManifestServer(("127.0.0.1", 0), ManifestHandler)
+        port = server.server_address[1]
+        callback_url = f"http://127.0.0.1:{port}/callback"
+        manifest = {
+            "name": app_name,
+            "url": args.homepage,
+            "description": "GitHub Actions organization runner registration",
+            "redirect_url": callback_url,
+            "public": False,
+            "default_events": [],
+            "default_permissions": {
+                "organization_self_hosted_runners": "write"
+            },
+        }
+        organization = urllib.parse.quote(args.organization, safe="")
+
+        server.state_token = state
+        server.manifest = json.dumps(manifest, separators=(",", ":"))
+        server.github_url = (
+            "https://github.com/organizations/"
+            f"{organization}/settings/apps/new?state={urllib.parse.quote(state)}"
+        )
+        server.callback_code = None
+        server.callback_event = threading.Event()
+
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        server_started = True
+        start_url = f"http://127.0.0.1:{port}/"
+        print(f"Waiting up to {args.timeout} seconds for GitHub App creation…")
+        open_or_print(start_url, args.no_open)
+
+        if not server.callback_event.wait(args.timeout):
+            raise RuntimeError("timed out waiting for GitHub's manifest callback")
+        code = server.callback_code
+        if code is None:
+            raise RuntimeError("GitHub's manifest callback did not include a code")
+
+        response = exchange_manifest_code(code)
+        credentials = write_credentials(args.output, args.organization, response)
+        install_url = f"https://github.com/apps/{response['slug']}/installations/new"
+
+        print(f"Credentials written with mode 0600: {args.output}")
+        print("\nCoolify environment values:")
+        print(credentials, end="")
+        print("Install the app in the organization to activate runner registration.")
+        open_or_print(install_url, args.no_open)
+        return 0
+    except (OSError, RuntimeError, ValueError, json.JSONDecodeError) as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
+    finally:
+        if "server" in locals():
+            if server_started:
+                server.shutdown()
+            server.server_close()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

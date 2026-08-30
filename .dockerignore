@@ -1,0 +1,7 @@
+.git
+.github
+.env
+.DS_Store
+plans
+README.md
+scripts/create-github-app
