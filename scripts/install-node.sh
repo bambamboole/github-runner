@@ -42,5 +42,18 @@ if [[ "${actual_checksum}" != "${expected_checksum}" ]]; then
 fi
 
 tar -xJf "${work_dir}/${asset}" --directory /usr/local --strip-components=1
+
+# setup-node resolves a version range against the runner tool cache before it
+# downloads anything: node/<version>/<arch> plus the <arch>.complete marker
+# turns the lookup into a local hit. A separate copy on purpose — the global
+# /usr/local install keeps serving jobs that never call setup-node.
+if [[ -n "${RUNNER_TOOL_CACHE:-}" ]]; then
+  tool_dir="${RUNNER_TOOL_CACHE}/node/${NODE_VERSION}/${node_arch}"
+  mkdir -p "${tool_dir}"
+  tar -xJf "${work_dir}/${asset}" --directory "${tool_dir}" --strip-components=1
+  touch "${tool_dir}.complete"
+  chown -R runner:runner "${RUNNER_TOOL_CACHE}"
+fi
+
 node --version
 npm --version

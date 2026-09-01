@@ -41,6 +41,21 @@ php-config --version | grep -q '^8\.5\.'
 composer --version | grep -q 'Composer version 2\.10\.3'
 node --version | grep -q '^v24\.20\.0$'
 npm --version
+
+node_arch="$(uname -m)"
+case "${node_arch}" in
+  x86_64) node_arch="x64" ;;
+  aarch64) node_arch="arm64" ;;
+esac
+tool_cache_node="${RUNNER_TOOL_CACHE:-/opt/hostedtoolcache}/node/24.20.0/${node_arch}"
+if [[ ! -x "${tool_cache_node}/bin/node" || ! -e "${tool_cache_node}.complete" ]]; then
+  echo "Node is missing from the runner tool cache at ${tool_cache_node}." >&2
+  exit 1
+fi
+if ! runuser --user runner -- test -w "${RUNNER_TOOL_CACHE:-/opt/hostedtoolcache}"; then
+  echo "The runner tool cache is not writable by the runner user." >&2
+  exit 1
+fi
 playwright --version | grep -q 'Version 1\.62\.1'
 
 if ! runuser --user runner -- test -w /ms-playwright; then

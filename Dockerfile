@@ -9,7 +9,8 @@ ARG NODE_VERSION="24.20.0"
 ARG PLAYWRIGHT_VERSION="1.62.1"
 ARG RUSTFS_VERSION="1.0.0-rc.4"
 
-ENV PLAYWRIGHT_BROWSERS_PATH="/ms-playwright"
+ENV PLAYWRIGHT_BROWSERS_PATH="/ms-playwright" \
+    RUNNER_TOOL_CACHE="/opt/hostedtoolcache"
 
 COPY --chmod=755 scripts/install-php.sh /usr/local/src/install-php.sh
 COPY --chmod=755 scripts/install-node.sh /usr/local/src/install-node.sh
@@ -17,7 +18,7 @@ COPY --chmod=755 scripts/install-playwright.sh /usr/local/src/install-playwright
 COPY --chmod=755 scripts/install-rustfs.sh /usr/local/src/install-rustfs.sh
 
 RUN COMPOSER_VERSION="${COMPOSER_VERSION}" /usr/local/src/install-php.sh \
-    && NODE_VERSION="${NODE_VERSION}" TARGETARCH="${TARGETARCH}" /usr/local/src/install-node.sh \
+    && NODE_VERSION="${NODE_VERSION}" TARGETARCH="${TARGETARCH}" RUNNER_TOOL_CACHE="${RUNNER_TOOL_CACHE}" /usr/local/src/install-node.sh \
     && PLAYWRIGHT_VERSION="${PLAYWRIGHT_VERSION}" /usr/local/src/install-playwright.sh \
     && RUSTFS_VERSION="${RUSTFS_VERSION}" TARGETARCH="${TARGETARCH}" /usr/local/src/install-rustfs.sh \
     && rm -f \
