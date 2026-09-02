@@ -5,7 +5,7 @@ Dieses Repository baut einen organisationsunabhängigen GitHub Actions Runner f�
 ## Enthalten
 
 - GitHub Actions Runner 2.337.0 auf Ubuntu 24.04
-- PHP CLI 8.4 und 8.5, Composer 2.10.3 und übliche Web- und Datenbank-Extensions
+- PHP CLI 8.4 und 8.5, Composer 2.10.3, PCOV, Xdebug und übliche Web- und Datenbank-Extensions
 - Node.js 24.20.0 LTS
 - AWS CLI
 - Playwright 1.62.1 mit Chromium
@@ -16,7 +16,7 @@ Das Upstream-Image ist mit Version und Multi-Arch-Digest gepinnt. Runner-, Playw
 
 GitHub Actions baut und testet das Image separat für `linux/amd64` und `linux/arm64`. Nach einem erfolgreichen Push auf `main` veröffentlicht die Pipeline ein gemeinsames Multi-Arch-Image als `ghcr.io/bambamboole/github-runner:latest` und zusätzlich mit einem unveränderlichen `sha-<commit>`-Tag.
 
-Zusätzlich kann Packer aus Ubuntu 24.04 einen privaten DigitalOcean-Snapshot für kurzlebige CI-Fab-Runner bauen. Dieses VM-Image ist derzeit AMD64, enthält AWS CLI 2.36.38 und stellt den Runner unter `/opt/actions-runner` für den Benutzer `runner` bereit.
+Zusätzlich kann Packer aus Ubuntu 24.04 einen privaten DigitalOcean-Snapshot für kurzlebige CI-Fab-Runner bauen. Dieses VM-Image ist derzeit AMD64, enthält AWS CLI 2.36.38, ein allgemeines CI-Toolset und einen dauerhaft aktivierten, nur lokal erreichbaren Valkey-Dienst mit `redis-cli`-Kompatibilität. Der Runner liegt unter `/opt/actions-runner` und läuft als Benutzer `runner`.
 
 ## GitHub App anlegen
 

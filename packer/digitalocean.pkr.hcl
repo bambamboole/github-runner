@@ -54,6 +54,16 @@ variable "rustfs_version" {
   default = "1.0.0-rc.4"
 }
 
+variable "yq_checksum" {
+  type    = string
+  default = "fa52a4e758c63d38299163fbdd1edfb4c4963247918bf9c1c5d31d84789eded4"
+}
+
+variable "yq_version" {
+  type    = string
+  default = "4.53.3"
+}
+
 variable "snapshot_name" {
   type    = string
   default = ""
@@ -145,6 +155,8 @@ build {
       "RUNNER_CHECKSUM=${var.runner_checksum}",
       "RUNNER_VERSION=${var.runner_version}",
       "RUSTFS_VERSION=${var.rustfs_version}",
+      "YQ_CHECKSUM=${var.yq_checksum}",
+      "YQ_VERSION=${var.yq_version}",
     ]
     script = "packer/scripts/install.sh"
   }

@@ -8,15 +8,34 @@ export DEBIAN_FRONTEND=noninteractive
 cloud-init status --wait
 apt-get update
 apt-get install -y --no-install-recommends \
+  acl \
+  build-essential \
   ca-certificates \
   curl \
+  dnsutils \
+  file \
   git \
+  git-lfs \
   gnupg \
+  gh \
+  iputils-ping \
   jq \
+  netcat-openbsd \
+  pipx \
+  pkg-config \
+  python3-pip \
+  python3-venv \
+  ripgrep \
+  rsync \
+  shellcheck \
   sudo \
   ufw \
   unzip \
-  xz-utils
+  valkey-redis-compat \
+  valkey-server \
+  xz-utils \
+  zip \
+  zstd
 
 if ! id runner >/dev/null 2>&1; then
   useradd --create-home --shell /bin/bash runner
@@ -65,6 +84,13 @@ if [[ ! -e /swapfile ]]; then
 fi
 
 systemctl enable --now docker
+
+sed -i -E 's/^[[:space:]]*bind .*/bind 127.0.0.1 -::1/' /etc/valkey/valkey.conf
+sed -i -E 's/^[[:space:]]*protected-mode .*/protected-mode yes/' /etc/valkey/valkey.conf
+grep -qx 'bind 127.0.0.1 -::1' /etc/valkey/valkey.conf
+grep -qx 'protected-mode yes' /etc/valkey/valkey.conf
+systemctl enable --now valkey-server.service
+
 ufw default deny incoming
 ufw default allow outgoing
 ufw allow OpenSSH
