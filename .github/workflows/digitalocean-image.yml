@@ -1,0 +1,73 @@
+name: Build DigitalOcean runner image
+
+on:
+  workflow_dispatch:
+    inputs:
+      snapshot_name:
+        description: Optional snapshot name
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: digitalocean-runner-image
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build and boot-test snapshot
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Packer
+        uses: hashicorp/setup-packer@ce93c3c08a6c2ff2275bf4b54ff0d9a75f6c9789 # v3.4.0
+        with:
+          version: "1.16.0"
+
+      - name: Set up doctl
+        uses: digitalocean/action-doctl@3cb3953159719656269e044e0e24ca16dd2a690f # v2.5.2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_TOKEN }}
+
+      - name: Build snapshot
+        env:
+          DIGITALOCEAN_TOKEN: ${{ secrets.DIGITALOCEAN_TOKEN }}
+          SNAPSHOT_NAME: ${{ inputs.snapshot_name }}
+        run: |
+          if [[ -n "${SNAPSHOT_NAME}" ]]; then
+            export PKR_VAR_snapshot_name="${SNAPSHOT_NAME}"
+          fi
+          make packer-build
+
+      - name: Read snapshot ID
+        id: snapshot
+        run: |
+          artifact_id="$(jq -r '.builds[-1].artifact_id' packer/manifest.json)"
+          snapshot_id="${artifact_id##*:}"
+          if [[ ! "${snapshot_id}" =~ ^[0-9]+$ ]]; then
+            echo "Unexpected Packer artifact ID: ${artifact_id}" >&2
+            exit 1
+          fi
+          echo "id=${snapshot_id}" >> "${GITHUB_OUTPUT}"
+
+      - name: Boot-test snapshot
+        run: tests/digitalocean-snapshot-smoke.sh "${{ steps.snapshot.outputs.id }}"
+
+      - name: Publish build summary
+        env:
+          SNAPSHOT_ID: ${{ steps.snapshot.outputs.id }}
+        run: |
+          snapshot_name="$(doctl compute image get "${SNAPSHOT_ID}" --format Name --no-header)"
+          {
+            echo "## DigitalOcean runner snapshot"
+            echo
+            echo "- Name: \`${snapshot_name}\`"
+            echo "- ID: \`${SNAPSHOT_ID}\`"
+            echo "- Region: \`fra1\`"
+            echo "- Boot smoke test: passed"
+          } >> "${GITHUB_STEP_SUMMARY}"

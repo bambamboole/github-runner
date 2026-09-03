@@ -11,9 +11,11 @@ expected_extensions=(
   pdo_mysql
   pdo_pgsql
   pdo_sqlite
+  pcov
   redis
   soap
   xml
+  xdebug
   zip
 )
 
@@ -27,6 +29,8 @@ for version in 8.4 8.5; do
     fi
   done
   "php${version}" -r 'exit(extension_loaded("Zend OPcache") ? 0 : 1);'
+  "php${version}" -r 'exit(phpversion("xdebug") === false ? 1 : 0);'
+  "php${version}" -r 'exit(ini_get("pcov.enabled") === "1" ? 0 : 1);'
 done
 
 use-php 8.4

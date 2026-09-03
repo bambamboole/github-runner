@@ -2,3 +2,4 @@ plans/
 .env
 .github-app.env
 .DS_Store
+packer/manifest.json

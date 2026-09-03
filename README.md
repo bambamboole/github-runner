@@ -5,8 +5,9 @@ Dieses Repository baut einen organisationsunabhängigen GitHub Actions Runner f�
 ## Enthalten
 
 - GitHub Actions Runner 2.337.0 auf Ubuntu 24.04
-- PHP CLI 8.4 und 8.5, Composer 2.10.3 und übliche Web- und Datenbank-Extensions
+- PHP CLI 8.4 und 8.5, Composer 2.10.3, PCOV, Xdebug und übliche Web- und Datenbank-Extensions
 - Node.js 24.20.0 LTS
+- AWS CLI
 - Playwright 1.62.1 mit Chromium
 - RustFS 1.0.0-rc.4 für kurzlebige S3-Testinstanzen
 - Docker CLI mit Zugriff auf den Docker-Daemon des CI-Hosts
@@ -14,6 +15,8 @@ Dieses Repository baut einen organisationsunabhängigen GitHub Actions Runner f�
 Das Upstream-Image ist mit Version und Multi-Arch-Digest gepinnt. Runner-, Playwright-, Composer-, Node- und RustFS-Versionen werden bewusst über Pull Requests aktualisiert.
 
 GitHub Actions baut und testet das Image separat für `linux/amd64` und `linux/arm64`. Nach einem erfolgreichen Push auf `main` veröffentlicht die Pipeline ein gemeinsames Multi-Arch-Image als `ghcr.io/bambamboole/github-runner:latest` und zusätzlich mit einem unveränderlichen `sha-<commit>`-Tag.
+
+Zusätzlich kann Packer aus Ubuntu 24.04 einen privaten DigitalOcean-Snapshot für kurzlebige CI-Fab-Runner bauen. Dieses VM-Image ist derzeit AMD64, enthält AWS CLI 2.36.38, ein allgemeines CI-Toolset und einen dauerhaft aktivierten, nur lokal erreichbaren Valkey-Dienst mit `redis-cli`-Kompatibilität. Der Runner liegt unter `/opt/actions-runner` und läuft als Benutzer `runner`.
 
 ## GitHub App anlegen
 
@@ -59,6 +62,33 @@ make test
 ```
 
 Die Tests prüfen beide PHP-Versionen und Extensions, Composer und Node, einen echten Headless-Chromium-Start, den vollständigen RustFS-S3-Lifecycle und einen kurzlebigen Container über den gemounteten Docker-Socket. Im emulierten ARM64-CI-Job wird statt des unter QEMU nicht zuverlässig startenden Chromium-Prozesses die installierte ausführbare Browser-Binary geprüft; der echte Browser-Start bleibt im AMD64-Job verpflichtend.
+
+## DigitalOcean-Image bauen
+
+Das Repository-Secret `DIGITALOCEAN_TOKEN` muss einen DigitalOcean Personal Access Token mit Lese- und Schreibzugriff auf Droplets, Snapshots, Images, Tags und SSH-Keys enthalten. Danach lässt sich der Workflow `Build DigitalOcean runner image` manuell starten.
+
+Der Workflow:
+
+1. baut mit Packer aus `ubuntu-24-04-x64` einen Snapshot in `fra1`,
+2. startet aus dem Snapshot ein neues Test-Droplet,
+3. prüft den Image-Vertrag und alle installierten Werkzeuge einschließlich Chromium, RustFS und Docker,
+4. löscht das Test-Droplet und den temporären SSH-Key wieder.
+
+Der getestete Snapshot bleibt im DigitalOcean-Account erhalten. Seine ID steht in der Workflow-Zusammenfassung und kann in CI Fab als Runner-Image hinterlegt werden.
+
+Mit lokal installiertem Packer 1.16.0 lässt sich die Vorlage ohne Cloud-Zugriff prüfen:
+
+```bash
+make packer-validate
+```
+
+Ein lokaler Build benötigt zusätzlich `doctl` und nutzt `DIGITALOCEAN_TOKEN` aus der Umgebung:
+
+```bash
+export DIGITALOCEAN_TOKEN=...
+make packer-build
+tests/digitalocean-snapshot-smoke.sh "$(jq -r '.builds[-1].artifact_id | split(":")[-1]' packer/manifest.json)"
+```
 
 ## In Coolify deployen
 

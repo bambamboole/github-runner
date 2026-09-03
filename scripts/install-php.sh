@@ -48,10 +48,12 @@ extensions=(
   mbstring
   mysql
   pgsql
+  pcov
   redis
   soap
   sqlite3
   xml
+  xdebug
   zip
 )
 
@@ -65,6 +67,13 @@ packages+=(php8.4-opcache)
 
 apt-get update
 apt-get install -y --no-install-recommends "${packages[@]}"
+
+for version in 8.4 8.5; do
+  printf '%s\n' \
+    'zend_extension=xdebug.so' \
+    'xdebug.mode=off' \
+    > "/etc/php/${version}/mods-available/xdebug.ini"
+done
 
 update-alternatives --set php /usr/bin/php8.5
 update-alternatives --set phpize /usr/bin/phpize8.5
