@@ -27,4 +27,4 @@ services:
       APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:?Set GITHUB_APP_PRIVATE_KEY in Coolify}
       RUNNER_NAME: ${RUNNER_NAME:-github-ci-01}
       RUNNER_GROUP: ${RUNNER_GROUP:-Default}
-      LABELS: ${RUNNER_LABELS:-ci,docker,php-8.4,php-8.5,playwright,chromium,rustfs}
+      LABELS: ${RUNNER_LABELS:-ci,docker,php-8.4,php-8.5,playwright,chromium,rust,rustfs}

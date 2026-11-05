@@ -89,7 +89,9 @@ sed -i -E 's/^[[:space:]]*bind .*/bind 127.0.0.1 -::1/' /etc/valkey/valkey.conf
 sed -i -E 's/^[[:space:]]*protected-mode .*/protected-mode yes/' /etc/valkey/valkey.conf
 grep -qx 'bind 127.0.0.1 -::1' /etc/valkey/valkey.conf
 grep -qx 'protected-mode yes' /etc/valkey/valkey.conf
-systemctl enable --now valkey-server.service
+# On demand: a running Valkey holds 6379, which a job's redis service container
+# needs to publish.
+systemctl disable --now valkey-server.service
 
 ufw default deny incoming
 ufw default allow outgoing

@@ -7,16 +7,17 @@ Dieses Repository baut einen organisationsunabhängigen GitHub Actions Runner f�
 - GitHub Actions Runner 2.337.0 auf Ubuntu 24.04
 - PHP CLI 8.4 und 8.5, Composer 2.10.3, PCOV, Xdebug und übliche Web- und Datenbank-Extensions
 - Node.js 24.20.0 LTS
+- Rust 1.99.1 (Standard) und 1.95 über rustup 1.29.3, jeweils mit `clippy`, `rustfmt` und dem Target `wasm32-unknown-unknown`, dazu `wasm-pack` 0.15.1, `cmake` und `libssl-dev`
 - AWS CLI
 - Playwright 1.62.1 mit Chromium
 - RustFS 1.0.0-rc.4 für kurzlebige S3-Testinstanzen
 - Docker CLI mit Zugriff auf den Docker-Daemon des CI-Hosts
 
-Das Upstream-Image ist mit Version und Multi-Arch-Digest gepinnt. Runner-, Playwright-, Composer-, Node- und RustFS-Versionen werden bewusst über Pull Requests aktualisiert.
+Das Upstream-Image ist mit Version und Multi-Arch-Digest gepinnt. Runner-, Playwright-, Composer-, Node-, Rust- und RustFS-Versionen werden bewusst über Pull Requests aktualisiert.
 
 GitHub Actions baut und testet das Image separat für `linux/amd64` und `linux/arm64`. Nach einem erfolgreichen Push auf `main` veröffentlicht die Pipeline ein gemeinsames Multi-Arch-Image als `ghcr.io/bambamboole/github-runner:latest` und zusätzlich mit einem unveränderlichen `sha-<commit>`-Tag.
 
-Zusätzlich kann Packer aus Ubuntu 24.04 einen privaten DigitalOcean-Snapshot für kurzlebige CI-Fab-Runner bauen. Dieses VM-Image ist derzeit AMD64, enthält AWS CLI 2.36.38, ein allgemeines CI-Toolset und einen dauerhaft aktivierten, nur lokal erreichbaren Valkey-Dienst mit `redis-cli`-Kompatibilität. Der Runner liegt unter `/opt/actions-runner` und läuft als Benutzer `runner`.
+Zusätzlich kann Packer aus Ubuntu 24.04 einen privaten DigitalOcean-Snapshot für kurzlebige CI-Fab-Runner bauen. Dieses VM-Image ist derzeit AMD64, enthält AWS CLI 2.36.38, ein allgemeines CI-Toolset und einen nur lokal erreichbaren Valkey-Dienst mit `redis-cli`-Kompatibilität. Valkey startet nicht von selbst, damit ein `redis`-Service-Container Port 6379 veröffentlichen kann; ein Job, der ihn braucht, startet ihn mit `sudo systemctl start valkey-server`. Der Runner liegt unter `/opt/actions-runner` und läuft als Benutzer `runner`.
 
 ## GitHub App anlegen
 
@@ -61,7 +62,7 @@ make build
 make test
 ```
 
-Die Tests prüfen beide PHP-Versionen und Extensions, Composer und Node, einen echten Headless-Chromium-Start, den vollständigen RustFS-S3-Lifecycle und einen kurzlebigen Container über den gemounteten Docker-Socket. Im emulierten ARM64-CI-Job wird statt des unter QEMU nicht zuverlässig startenden Chromium-Prozesses die installierte ausführbare Browser-Binary geprüft; der echte Browser-Start bleibt im AMD64-Job verpflichtend.
+Die Tests prüfen beide PHP-Versionen und Extensions, Composer und Node, einen echten Rust-Build nativ und nach WebAssembly, einen echten Headless-Chromium-Start, den vollständigen RustFS-S3-Lifecycle und einen kurzlebigen Container über den gemounteten Docker-Socket. Im emulierten ARM64-CI-Job wird statt des unter QEMU nicht zuverlässig startenden Chromium-Prozesses die installierte ausführbare Browser-Binary geprüft; der echte Browser-Start bleibt im AMD64-Job verpflichtend.
 
 ## DigitalOcean-Image bauen
 
@@ -132,7 +133,7 @@ jobs:
       - run: php --version
 ```
 
-Weitere Labels sind `docker`, `php-8.4`, `playwright`, `chromium` und `rustfs`. Eigene Labels werden über `RUNNER_LABELS` als kommaseparierte Liste gesetzt.
+Weitere Labels sind `docker`, `php-8.4`, `playwright`, `chromium`, `rust` und `rustfs`. Eigene Labels werden über `RUNNER_LABELS` als kommaseparierte Liste gesetzt.
 
 ### PHP auswählen
 

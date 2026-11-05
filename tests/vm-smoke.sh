@@ -31,11 +31,19 @@ rm -rf /opt/actions-runner/_diag
 
 grep -qx 'PLAYWRIGHT_BROWSERS_PATH=/ms-playwright' /opt/actions-runner/.env
 grep -qx 'RUNNER_TOOL_CACHE=/opt/hostedtoolcache' /opt/actions-runner/.env
+grep -qx 'CARGO_HOME=/usr/local/cargo' /opt/actions-runner/.env
+grep -qx 'RUSTUP_HOME=/usr/local/rustup' /opt/actions-runner/.env
 
 systemctl is-enabled --quiet docker
 systemctl is-active --quiet docker
-systemctl is-enabled --quiet valkey-server.service
-systemctl is-active --quiet valkey-server.service
+if systemctl is-enabled --quiet valkey-server.service || systemctl is-active --quiet valkey-server.service; then
+  echo "Valkey must not start on its own: it would hold the port of a redis service container." >&2
+  exit 1
+fi
+if [[ -n "$(ss -H -ltn 'sport = :6379')" ]]; then
+  echo "Port 6379 is taken." >&2
+  exit 1
+fi
 ufw status | grep -q '^Status: active$'
 
 required_executables=(
@@ -78,6 +86,11 @@ trap 'rm -rf -- "${venv_dir}"' EXIT
 python3 -m venv "${venv_dir}"
 "${venv_dir}/bin/pip" --version
 
+sudo -u runner -H sudo -n systemctl start valkey-server.service
+for _ in {1..30}; do
+  redis-cli ping 2>/dev/null | grep -qx PONG && break
+  sleep 1
+done
 redis-cli ping | grep -qx PONG
 sudo -u runner -H redis-cli ping | grep -qx PONG
 listeners="$(ss -H -ltn 'sport = :6379' | awk '{ print $4 }')"
@@ -85,6 +98,7 @@ if [[ -z "${listeners}" ]] || grep -Eq '^(0\.0\.0\.0|\*|\[::\]):6379$' <<< "${li
   echo "Valkey is not restricted to loopback: ${listeners}" >&2
   exit 1
 fi
+systemctl stop valkey-server.service
 
 PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
 RUNNER_TOOL_CACHE=/opt/hostedtoolcache \
@@ -96,3 +110,7 @@ sudo -u runner -H env \
   "${TEST_DIR}/rustfs-smoke.sh"
 
 sudo -u runner -H "${TEST_DIR}/docker-smoke.sh"
+
+# Exactly the runner's .env, so this proves what a job gets.
+# shellcheck disable=SC2046
+sudo -u runner -H env --ignore-environment HOME=/home/runner $(cat /opt/actions-runner/.env) "${TEST_DIR}/rust-smoke.sh"

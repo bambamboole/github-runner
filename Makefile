@@ -1,7 +1,7 @@
 IMAGE ?= github-runner:local
 SKIP_PLAYWRIGHT_LAUNCH ?= false
 
-.PHONY: build compose-config lint packer-build packer-init packer-validate test test-docker test-image test-rustfs
+.PHONY: build compose-config lint packer-build packer-init packer-validate test test-docker test-image test-rust test-rustfs
 
 build:
 	docker build --tag $(IMAGE) .
@@ -32,6 +32,13 @@ test-image:
 		--volume "$(CURDIR)/tests:/tests:ro" \
 		$(IMAGE) /tests/smoke.sh
 
+test-rust:
+	docker run --rm \
+		--entrypoint /bin/bash \
+		--user runner \
+		--volume "$(CURDIR)/tests:/tests:ro" \
+		$(IMAGE) /tests/rust-smoke.sh
+
 test-rustfs:
 	docker run --rm \
 		--entrypoint /bin/bash \
@@ -45,4 +52,4 @@ test-docker:
 		--volume "$(CURDIR)/tests:/tests:ro" \
 		$(IMAGE) /tests/docker-smoke.sh
 
-test: lint compose-config test-image test-rustfs test-docker
+test: lint compose-config test-image test-rust test-rustfs test-docker
