@@ -117,12 +117,13 @@ done
 
 scp "${ssh_options[@]}" \
   "${TEST_DIR}/docker-smoke.sh" \
+  "${TEST_DIR}/rust-smoke.sh" \
   "${TEST_DIR}/rustfs-smoke.sh" \
   "${TEST_DIR}/smoke.sh" \
   "${TEST_DIR}/vm-smoke.sh" \
   "root@${public_ip}:/tmp/"
 
 ssh "${ssh_options[@]}" "root@${public_ip}" \
-  'chmod 0755 /tmp/docker-smoke.sh /tmp/rustfs-smoke.sh /tmp/smoke.sh /tmp/vm-smoke.sh && /tmp/vm-smoke.sh'
+  'chmod 0755 /tmp/docker-smoke.sh /tmp/rust-smoke.sh /tmp/rustfs-smoke.sh /tmp/smoke.sh /tmp/vm-smoke.sh && /tmp/vm-smoke.sh'
 
 echo "Snapshot ${SNAPSHOT_ID} booted and passed the VM smoke tests."

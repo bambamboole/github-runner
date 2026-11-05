@@ -71,6 +71,9 @@ jobs:
       - name: Test installed tools
         run: make test-image IMAGE="github-runner:test-${{ matrix.arch }}"
 
+      - name: Test Rust toolchain
+        run: make test-rust IMAGE="github-runner:test-${{ matrix.arch }}"
+
       - name: Test RustFS lifecycle
         run: make test-rustfs IMAGE="github-runner:test-${{ matrix.arch }}"
 

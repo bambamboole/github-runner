@@ -8,6 +8,8 @@ readonly PLAYWRIGHT_VERSION="${PLAYWRIGHT_VERSION:?PLAYWRIGHT_VERSION is require
 readonly RUNNER_CHECKSUM="${RUNNER_CHECKSUM:?RUNNER_CHECKSUM is required}"
 readonly RUNNER_VERSION="${RUNNER_VERSION:?RUNNER_VERSION is required}"
 readonly RUSTFS_VERSION="${RUSTFS_VERSION:?RUSTFS_VERSION is required}"
+readonly RUSTUP_VERSION="${RUSTUP_VERSION:?RUSTUP_VERSION is required}"
+readonly RUST_TOOLCHAINS="${RUST_TOOLCHAINS:?RUST_TOOLCHAINS is required}"
 readonly YQ_CHECKSUM="${YQ_CHECKSUM:?YQ_CHECKSUM is required}"
 readonly YQ_VERSION="${YQ_VERSION:?YQ_VERSION is required}"
 
@@ -19,12 +21,14 @@ chmod 0755 \
   /tmp/install-node.sh \
   /tmp/install-php.sh \
   /tmp/install-playwright.sh \
+  /tmp/install-rust.sh \
   /tmp/install-rustfs.sh
 
 TARGETARCH=amd64 /tmp/install-aws-cli.sh
 /tmp/install-php.sh
 TARGETARCH=amd64 /tmp/install-node.sh
 /tmp/install-playwright.sh
+TARGETARCH=amd64 /tmp/install-rust.sh
 TARGETARCH=amd64 /tmp/install-rustfs.sh
 
 work_dir="$(mktemp -d)"
@@ -48,9 +52,13 @@ printf '%s  %s\n' "${RUNNER_CHECKSUM}" "${runner_archive}" | sha256sum --check -
 tar -xzf "${runner_archive}" --directory /opt/actions-runner
 /opt/actions-runner/bin/installdependencies.sh
 
+# Loaded by the runner itself, so jobs get these however it was started.
 printf '%s\n' \
+  'CARGO_HOME=/usr/local/cargo' \
+  'PATH=/usr/local/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin' \
   'PLAYWRIGHT_BROWSERS_PATH=/ms-playwright' \
   'RUNNER_TOOL_CACHE=/opt/hostedtoolcache' \
+  'RUSTUP_HOME=/usr/local/rustup' \
   > /opt/actions-runner/.env
 
 chown -R runner:runner \

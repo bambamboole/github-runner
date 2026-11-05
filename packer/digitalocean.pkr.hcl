@@ -49,9 +49,19 @@ variable "runner_version" {
   default = "2.337.0"
 }
 
+variable "rust_toolchains" {
+  type    = string
+  default = "1.99.1 1.95"
+}
+
 variable "rustfs_version" {
   type    = string
   default = "1.0.0-rc.4"
+}
+
+variable "rustup_version" {
+  type    = string
+  default = "1.29.3"
 }
 
 variable "yq_checksum" {
@@ -132,6 +142,11 @@ build {
   }
 
   provisioner "file" {
+    source      = "scripts/install-rust.sh"
+    destination = "/tmp/install-rust.sh"
+  }
+
+  provisioner "file" {
     source      = "scripts/install-rustfs.sh"
     destination = "/tmp/install-rustfs.sh"
   }
@@ -155,6 +170,8 @@ build {
       "RUNNER_CHECKSUM=${var.runner_checksum}",
       "RUNNER_VERSION=${var.runner_version}",
       "RUSTFS_VERSION=${var.rustfs_version}",
+      "RUSTUP_VERSION=${var.rustup_version}",
+      "RUST_TOOLCHAINS=${var.rust_toolchains}",
       "YQ_CHECKSUM=${var.yq_checksum}",
       "YQ_VERSION=${var.yq_version}",
     ]
@@ -164,6 +181,11 @@ build {
   provisioner "file" {
     source      = "tests/docker-smoke.sh"
     destination = "/tmp/docker-smoke.sh"
+  }
+
+  provisioner "file" {
+    source      = "tests/rust-smoke.sh"
+    destination = "/tmp/rust-smoke.sh"
   }
 
   provisioner "file" {
@@ -183,7 +205,7 @@ build {
 
   provisioner "shell" {
     inline = [
-      "chmod 0755 /tmp/docker-smoke.sh /tmp/rustfs-smoke.sh /tmp/smoke.sh /tmp/vm-smoke.sh",
+      "chmod 0755 /tmp/docker-smoke.sh /tmp/rust-smoke.sh /tmp/rustfs-smoke.sh /tmp/smoke.sh /tmp/vm-smoke.sh",
       "/tmp/vm-smoke.sh",
     ]
   }
